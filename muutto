@@ -1,0 +1,8 @@
+#!/usr/bin/env bb
+;; -*- mode: clojure -*-
+
+;(require '[babashka.deps :as deps])
+;(deps/add-deps '{:deps {org.babashka/cli {:mvn/version "0.8.67"}}})
+
+(require '[muutto.main :as main])
+(main/-main *command-line-args*)
