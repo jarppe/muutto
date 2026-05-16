@@ -1,0 +1,14 @@
+{:psql-wrapper "kubectl
+                  --context=${opt:context}
+                  --namespace=${opt:namespace}
+                  exec svc/db --"
+
+ :context      "docker-desktop"
+ :namespace    "smiley"
+
+ :env          {:dev  {:dbname "smiley"}
+
+                :test {:dbname "test"}
+
+                :prod {:dbname    "smiley-prod"
+                       :namespace "smiley-prod"}}}

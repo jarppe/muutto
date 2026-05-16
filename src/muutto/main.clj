@@ -1,100 +1,94 @@
 (ns muutto.main
   (:require [clojure.string :as str]
+            [clojure.java.io :as io]
             [babashka.cli :as cli]
-            [babashka.process :as p]
-            [babashka.fs :as fs])
-  (:import (java.io File)
-           (java.nio.file Path)))
-
-
-
-(defn exit [code]
-  (System/exit code))
-
-
-(defn dir-exists? [x] false)
-
-
-(defn rtfm! [{:keys [spec type cause msg option] :as data}]
-  (when (= :org.babashka/cli type)
-    (case cause
-      :require (println (format "Missing required argument: %s\n" option))
-      :validate (println (format "%s does not exist!\n" msg))))
-  (exit 1))
+            [muutto.util :refer [error!]]
+            [muutto.config :as config]
+            [muutto.command.create-command :refer [create-command drop-command]]
+            [muutto.command.init-command :refer [init-command]]
+            [muutto.command.migrate-command :refer [migrate-command]]
+            [muutto.command.list-command :refer [list-command]]
+            [muutto.command.psql-command :refer [psql-command]])
+  (:import (java.io File)))
 
 
 (def cli-spec
-  {:spec {:num {:coerce :long
-                :desc "Number of some items"
-                :alias :n                     ; adds -n alias for --num
-                :validate pos?                ; tests if supplied --num >0
-                :require true}                ; --num,-n is required
-          :dir {:desc "Directory name to do stuff"
-                :alias :d
-                :validate dir-exists?}        ; tests if --dir exists
-          :flag {:coerce :boolean             ; defines a boolean flag
-                 :desc "I am just a flag"}
-          :help {:desc "Show command-line arguments"
-                 :alias :h}}
-   :error-fn rtfm!})
+  {:spec     {:dbname   {:desc     "Database name"
+                         :alias    :d
+                         :validate string?}
+              :username {:desc     "Username"
+                         :alias    :u
+                         :coerce   :string
+                         :validate string?}
+              :migname  {:desc     "Table name for migrations book keepping (default is muutto.migrations)"
+                         :coerce   :string
+                         :validate string?}
+              :config   {:desc     "Config file name (default is muutto.edn)"
+                         :alias    :c
+                         :coerce   :string
+                         :validate (comp File/.canRead io/file)}
+              :env      {:desc   "Apply environment setting from configuration file"
+                         :alias  :e
+                         :coerce :keyword}
+              :verbose  {:desc   "Print diagnostic output"
+                         :alias  :v
+                         :coerce :boolean}
+              :init     {:desc   "Init created databases for migration"
+                         :coerce :boolean}
+              :migrate  {:desc   "Migrate created databases (implies --init)"
+                         :coerce :boolean}
+              :help     {:desc   "Show help"
+                         :alias  :h
+                         :coerce :boolean}}
+   :error-fn (fn rtfm! [{:keys [type cause option value]}]
+               (when (= :org.babashka/cli type)
+                 (.println System/err (case cause
+                                        :require (format "Missing required argument: %s" option)
+                                        :coerce  (format "Argument %s value is not valid" option)
+                                        :validate (cond
+                                                    (true? value)      (format "Argument %s requires value" option)
+                                                    (= option :config) (format "Config file %s not found" value)
+                                                    :else              (format "Argument %s value is not valid" option)))))
+               (System/exit 1))})
 
 
-(defn migrate
-  "Migrate database"
-  [_]
-  (println "Migrating..."))
-
-
-(defn create
-  "Create database"
-  [_]
-  (println "Creating..."))
-
-
-(defn drop
-  "Create database"
-  [_]
-  (println "Dropping..."))
-
-
-(defn test
-  "Testing database"
-  [_]
-  (println "Testing..."))
-
-
-(def commands [#'migrate
-               #'create
-               #'drop
-               #'test])
+(def commands (->> [#'create-command
+                    #'drop-command
+                    #'init-command
+                    #'migrate-command
+                    #'list-command
+                    #'psql-command]
+                   (map (fn [v]
+                          {:name    (-> v (meta) :name (name) (str/split #"-") (first))
+                           :doc     (-> v (meta) :doc)
+                           :command @v}))))
 
 
 (defn help! []
   (println "muutto - Database migrations the easy way")
   (println "usage: muutto <command> <args>")
   (println "command:")
-  (doseq [command (map meta commands)
-          :let [command-name (-> command :name (name))
-                command-doc  (-> command :doc)]]
-    (println (format "  %s %s %s" 
-                     command-name
-                     (str/join (repeat (- 12 (count command-name)) "-"))
-                     command-doc)))
+  (doseq [{:keys [name doc]} commands]
+    (println (format "  %s %s %s"
+                     name
+                     (str/join (repeat (- 10 (count name)) "-"))
+                     doc)))
   (println "args:")
   (println (cli/format-opts (merge cli-spec {:order (vec (keys (:spec cli-spec)))})))
   (println "")
   (println "For more complete documentation see https://codeberg.org/jarppe/muutto")
-  (exit 0))
+  (System/exit 0))
 
 
-
-
-(defn -main [[command & args]]
-  (when (or (str/blank? command) 
-            (#{"-h" ":h" "--help" ":help" "help"} command)
-            (some #{"-h" ":h" "--help" ":help"} args))
+(defn -main [args]
+  (when (some #{"-h" ":h" "--help" ":help"} args)
     (help!))
-  (let [opts (cli/parse-args args cli-spec)]
-    (if (or (:help opts) (:h opts))
-      (help!)
-      (println "Here are your cli args!:" opts))))
+  (let [{:keys [args opts]} (cli/parse-args args cli-spec)
+        config              (config/load-config opts)
+        action              (-> args (first) (or (help!)))
+        command             (or (some (fn [{:keys [name command]}]
+                                        (when (= name action)
+                                          command))
+                                      commands)
+                                (error! (str "unknown command: " action)))]
+    (command config (rest args))))
