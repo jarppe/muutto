@@ -1,14 +1,24 @@
 (ns muutto.util
-  (:require [clojure.string :as str])
+  (:require [clojure.string :as str]
+            [clojure.java.io :as io])
   (:import (java.time ZoneId
                       ZonedDateTime)
-           (java.time.format DateTimeFormatter)))
+           (java.time.format DateTimeFormatter) 
+           (java.io File)
+           (java.nio.file Path
+                          Files)
+           (java.security MessageDigest)
+           (java.util HexFormat)))
+
+
+(def exit-on-error? true)
 
 
 (defn error! [& message] 
-  (.println System/err (str "muutto: Error: " (str/join " " message) "\n"
+  (.println System/err (str "muutto: Error: " (str/join message) "\n"
                             "muutto: Try: muutto --help")) 
-  (System/exit 1))
+  (when exit-on-error? 
+    (System/exit 1)))
 
 
 (def default-dtf (DateTimeFormatter/ofPattern "yyyy/MM/dd HH:mm:ss"))
@@ -16,10 +26,35 @@
 
 
 (defn parse-datetime [datetime]
-  (ZonedDateTime/parse datetime DateTimeFormatter/ISO_OFFSET_DATE_TIME))
+  (when datetime
+    (ZonedDateTime/parse datetime DateTimeFormatter/ISO_OFFSET_DATE_TIME)))
 
 
 (defn format-datetime [datetime]
-  (-> datetime
-      (.withZoneSameInstant local-tz)
-      (.format default-dtf)))
+  (when datetime
+    (-> datetime
+        (.withZoneSameInstant local-tz)
+        (.format default-dtf))))
+
+
+(defn to-path [file]
+  (cond
+    (instance? Path file)   file
+    (instance? File file)   (.toPath file)
+    (instance? String file) (.toPath (io/file file))
+    :else (throw (ex-info (format "don't know hot to coerce path from %s (%s)"
+                                  (pr-str file)
+                                  (if (some? file)
+                                    (.getName (.getClass file))
+                                    "nil"))
+                          {}))))
+
+
+(def hex-format (-> (HexFormat/of)
+                    (.withLowerCase)))
+
+
+(defn file-hash [file]
+  (->> (Files/readAllBytes file)
+       (.digest (MessageDigest/getInstance "SHA-256"))
+       (.formatHex hex-format)))

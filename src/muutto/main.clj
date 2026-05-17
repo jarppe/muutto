@@ -13,33 +13,21 @@
 
 
 (def cli-spec
-  {:spec     {:dbname   {:desc     "Database name"
-                         :alias    :d
-                         :validate string?}
-              :username {:desc     "Username"
-                         :alias    :u
-                         :coerce   :string
-                         :validate string?}
-              :migname  {:desc     "Table name for migrations book keepping (default is muutto.migrations)"
-                         :coerce   :string
-                         :validate string?}
-              :config   {:desc     "Config file name (default is muutto.edn)"
-                         :alias    :c
-                         :coerce   :string
-                         :validate (comp File/.canRead io/file)}
-              :env      {:desc   "Apply environment setting from configuration file"
-                         :alias  :e
-                         :coerce :keyword}
-              :verbose  {:desc   "Print diagnostic output"
-                         :alias  :v
-                         :coerce :boolean}
-              :init     {:desc   "Init created databases for migration"
-                         :coerce :boolean}
-              :migrate  {:desc   "Migrate created databases (implies --init)"
-                         :coerce :boolean}
-              :help     {:desc   "Show help"
-                         :alias  :h
-                         :coerce :boolean}}
+  {:spec     {:env     {:desc     "Database environment (default is \"dev\")"
+                        :alias    :e
+                        :coerce   :keyword}
+              :config  {:desc     "Config file name (default is muutto.edn)"
+                        :alias    :c
+                        :coerce   :string
+                        :validate (comp File/.canRead io/file)}
+              :verbose {:desc   "Be more verbose"
+                        :alias  :v
+                        :coerce :boolean}
+              :dry-run {:desc   "Dry run, don't actually execute anything"
+                        :coerce :boolean}
+              :help    {:desc   "Show help"
+                        :alias  :h
+                        :coerce :boolean}}
    :error-fn (fn rtfm! [{:keys [type cause option value]}]
                (when (= :org.babashka/cli type)
                  (.println System/err (case cause
@@ -83,12 +71,15 @@
 (defn -main [args]
   (when (some #{"-h" ":h" "--help" ":help"} args)
     (help!))
-  (let [{:keys [args opts]} (cli/parse-args args cli-spec)
-        config              (config/load-config opts)
-        action              (-> args (first) (or (help!)))
-        command             (or (some (fn [{:keys [name command]}]
-                                        (when (= name action)
-                                          command))
-                                      commands)
-                                (error! (str "unknown command: " action)))]
-    (command config (rest args))))
+  (let [opts    (cli/parse-args args cli-spec)
+        action  (or (-> opts :args (first))
+                    (help!))
+        command (or (some (fn [{:keys [name command]}]
+                            (when (= name action)
+                              command))
+                          commands)
+                    (error! (str "unknown command: " action)))
+        config  (-> (config/load-config opts)
+                    (config/command-config (keyword action)))]
+    (command config)))
+

@@ -1,24 +1,27 @@
 (ns muutto.exec
   (:require [babashka.process :as p]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [muutto.config :as config]))
 
 
 (defn exec [config {:keys [args stmt input]}]
-  (let [psql    (str (:psql-wrapper config)
-                     (when (:psql-wrapper config) " ")
-                     (:psql-command config))
+  (let [psql    (str/join " " [(config/get config :psql-wrapper)
+                               (config/get config :psql-command)])
         args    (concat args (interleave (repeat "--command")
                                          (if (sequential? stmt)
                                            stmt
                                            [stmt])))
-        _       (when (:verbose config)
+        _       (when (-> config :opts :verbose)
                   (println "muutto: execute:" psql (str/join " " args)))
-        process (apply p/shell {:in       input
-                                :out      :string
-                                :err      :string
-                                :continue true}
-                       psql
-                       args)]
+        process (if (-> config :opts :dry-run)
+                  {:exit 0
+                   :out  "Dry run"}
+                  (apply p/shell {:in       input
+                                  :out      :string
+                                  :err      :string
+                                  :continue true}
+                         psql
+                         args))]
     (if (zero? (:exit process))
       (:out process)
       (do (.println System/err (str "psql error: " (:err process)))

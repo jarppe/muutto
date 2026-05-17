@@ -1,10 +1,13 @@
 (ns muutto.command.psql-command
-  (:require [muutto.exec :as exec]))
+  (:require [muutto.exec :as exec]
+            [muutto.util :refer [error!]]))
 
 
 (defn psql-command
   "Execute sql statements"
-  [opts]
-  (let [stmt (-> opts :args (rest))]
-    (-> (exec/exec opts {:stmt stmt})
+  [config]
+  (let [stmts (-> config :args (rest))]
+    (when-not (seq stmts)
+      (error! "psql command requires one of more statements to execute"))
+    (-> (exec/exec config {:stmt stmts})
         (println))))
