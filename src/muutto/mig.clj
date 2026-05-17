@@ -120,13 +120,12 @@
   (let [mig-table (config/get config :table)]
     (try
       (exec/exec (assoc config :on-error :throw)
-                 {:args  ["--single-transaction"
-                          "--file" "-"]
-                  :input (.toFile file)
-                  :stmt  [(format "insert into %s (file_name, file_hash) values ('%s', '%s')"
-                                  mig-table
-                                  file-name
-                                  file-hash)]})
+                 {:args ["--single-transaction"]
+                  :stmt [file
+                         (format "insert into %s (file_name, file_hash) values ('%s', '%s')"
+                                 mig-table
+                                 file-name
+                                 file-hash)]})
       (catch clojure.lang.ExceptionInfo e
         (println "error")
         (.println System/err (str "muutto: ERROR: migration of " file-name " failed"))
@@ -178,47 +177,37 @@
   )
 
 
-(defn duration [start]
-  (format "%.3f" (-> (- (System/nanoTime) start)
-                     (java.time.Duration/ofNanos)
-                     (.toMillis)
-                     (double)
-                     (/ 1000.0))))
-
-(defn status [applied? start]
-  (str (if applied?
-         (log/green  "done ")
-         (log/yellow "ok   "))
-       (log/gray "(")
-       (duration start)
-       (log/gray " sec)")))
-
-
-(defn migrate-database [config]
-  (println "muutto: migrating database" (:dbname config))
+(defn migrate-database [config {:keys [migration-start
+                                       file-start
+                                       file-done
+                                       file-migrated
+                                       migration-end]
+                                :or   {migration-start (constantly nil)
+                                       file-start      (constantly nil)
+                                       file-done       (constantly nil)
+                                       file-migrated   (constantly nil)
+                                       migration-end   (constantly nil)}}]
   (let [applied-migrations (->> (get-applied-migrations config)
                                 (reduce (fn [acc migration]
                                           (assoc acc (:file-name migration) migration))
                                         {}))
-        migration-files    (get-migration-files config)
-        filename-col-len   (->> migration-files
-                                (map (comp count :file-name))
-                                (reduce max 0)
-                                (+ 2))
-        row-fmt            (format (str "%%-%ds " (log/gray "| ")) filename-col-len)]
-    (println (format row-fmt "File:") "Status:")
-    (println (log/gray (str/join (repeat filename-col-len "-")) "-|--------------------"))
-    (doseq [migration-file migration-files]
-      (let [file-name (:file-name migration-file)
-            file-hash (:file-hash migration-file)
-            start     (System/nanoTime)]
-        (print (format row-fmt file-name))
-        (flush)
-        (let [applied      (get applied-migrations file-name)
-              applied-hash (:file-hash applied)]
-          (cond
-            (= file-hash applied-hash)  (println (status false start))
-            (nil? applied)              (do (apply-migration config migration-file)
-                                            (println (status true start)))
-            :else (do (println (log/red "error:") " file has been changed")
-                      (error! (format "muutto: migration file %s has been changed, migration halted" file-name)))))))))
+        migration-files    (get-migration-files config)]
+    (when-not (seq migration-files)
+      (println "no migration files nound")
+      (System/exit 0))
+    (-> (reduce (fn [ctx migration-file]
+                  (let [file-name    (:file-name migration-file)
+                        file-hash    (:file-hash migration-file)
+                        applied      (get applied-migrations file-name)
+                        applied-hash (:file-hash applied)
+                        ctx          (file-start ctx file-name)]
+                    (cond
+                      (= file-hash applied-hash)  (file-done ctx file-name)
+                      (nil? applied)              (do (apply-migration config migration-file)
+                                                      (file-migrated ctx file-name))
+                      :else (do (println)
+                                (println (log/red "error:") " file has been changed")
+                                (error! (format "muutto: migration file %s has been changed, migration halted" file-name))))))
+                (migration-start (map :file-name migration-files))
+                migration-files)
+        (migration-end))))

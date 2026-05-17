@@ -8,7 +8,8 @@
             [muutto.command.init-command :refer [init-command]]
             [muutto.command.migrate-command :refer [migrate-command]]
             [muutto.command.list-command :refer [list-command]]
-            [muutto.command.psql-command :refer [psql-command]])
+            [muutto.command.psql-command :refer [psql-command]]
+            [muutto.command.test-command :refer [test-command]])
   (:import (java.io File)))
 
 
@@ -45,7 +46,8 @@
                     #'init-command
                     #'migrate-command
                     #'list-command
-                    #'psql-command]
+                    #'psql-command
+                    #'test-command]
                    (map (fn [v]
                           {:name    (-> v (meta) :name (name) (str/split #"-") (first))
                            :doc     (-> v (meta) :doc)

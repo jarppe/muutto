@@ -22,7 +22,7 @@
       (when-not dbname
         (error! "database environment " env-name " is missing \"dbname\" configuration"))
       (println "muutto: creating database" dbname)
-      (exec/exec config {:stmt (str "create database " dbname)})
+      (exec/exec config {:stmt (str "create database " dbname " with lc_ctype='C.UTF-8'")})
       (when init?
         (println "muutto: initializing database" dbname)
         (mig/init-migrations target-config))

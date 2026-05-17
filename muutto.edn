@@ -6,7 +6,7 @@
  :default-env  {:create  :postgres
                 :drop    :postgres
                 :migrate :dev
-                :test    :test}
+                :test    :postgres}
 
 
  :env          {:postgres {:dbname "postgres"
@@ -14,7 +14,7 @@
 
                 :dev      {:dbname "smiley"}
 
-                :test     {:dbname "test"}
+                :test     {}
 
                 :prod     {:dbname    "smiley-prod"
                            :namespace "smiley-prod"}}
@@ -22,7 +22,7 @@
  :psql-wrapper "kubectl
                    --context=${config:context}
                    --namespace=${config:namespace}
-                   exec svc/db --"
+                   exec --stdin svc/db --"
 
  :context      "docker-desktop"
  :namespace    "smiley"}

@@ -1,7 +1,6 @@
--- 
--- Fancy SQL file
---
+-- requires: init.sql
 
--- requires: fofo.sql baba.sql
-
-create table test.foo (id serial);
+create table foo (
+  id    serial not null primary key,
+  value text   not null
+);

@@ -1,6 +1,7 @@
 (ns muutto.util
   (:require [clojure.string :as str]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [muutto.log :as log])
   (:import (java.time ZoneId
                       ZonedDateTime)
            (java.time.format DateTimeFormatter) 
@@ -58,3 +59,8 @@
   (->> (Files/readAllBytes file)
        (.digest (MessageDigest/getInstance "SHA-256"))
        (.formatHex hex-format)))
+
+
+(def cwd (to-path "."))
+
+
