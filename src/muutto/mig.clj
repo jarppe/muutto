@@ -177,37 +177,82 @@
   )
 
 
-(defn migrate-database [config {:keys [migration-start
-                                       file-start
-                                       file-done
-                                       file-migrated
-                                       migration-end]
-                                :or   {migration-start (constantly nil)
-                                       file-start      (constantly nil)
-                                       file-done       (constantly nil)
-                                       file-migrated   (constantly nil)
-                                       migration-end   (constantly nil)}}]
-  (let [applied-migrations (->> (get-applied-migrations config)
-                                (reduce (fn [acc migration]
-                                          (assoc acc (:file-name migration) migration))
-                                        {}))
-        migration-files    (get-migration-files config)]
-    (when-not (seq migration-files)
-      (println "no migration files nound")
-      (System/exit 0))
-    (-> (reduce (fn [ctx migration-file]
-                  (let [file-name    (:file-name migration-file)
-                        file-hash    (:file-hash migration-file)
-                        applied      (get applied-migrations file-name)
-                        applied-hash (:file-hash applied)
-                        ctx          (file-start ctx file-name)]
-                    (cond
-                      (= file-hash applied-hash)  (file-done ctx file-name)
-                      (nil? applied)              (do (apply-migration config migration-file)
-                                                      (file-migrated ctx file-name))
-                      :else (do (println)
-                                (println (log/red "error:") " file has been changed")
-                                (error! (format "muutto: migration file %s has been changed, migration halted" file-name))))))
-                (migration-start (map :file-name migration-files))
-                migration-files)
-        (migration-end))))
+(defn migration-start [files]
+  {:migration-start (System/nanoTime)
+   :file-count      (count files)
+   :file-col-len    (->> (map count files)
+                         (reduce max 0) 
+                         (+ 2))})
+
+
+(defn migration-end [{:keys [migration-start file-count]}]
+  (println (str (log/gray "migrated ")
+                (log/green file-count)
+                (log/gray " files in ")
+                (log/yellow (log/format-duration migration-start))
+                (log/gray " sec"))))
+
+
+(defn file-start [ctx file]
+  (let [file-col-len (:file-col-len ctx)]
+    (print "  " (log/rpad file-col-len file))
+    (flush)
+    (assoc ctx :start (System/nanoTime))))
+
+
+(defn file-done [ctx _file]
+  (println (str (log/yellow "passed   ")
+                (log/gray "(")
+                (log/yellow (log/format-duration (:start ctx)))
+                (log/gray " sec)")))
+  ctx)
+
+
+(defn file-migrated [ctx _file]
+  (println (log/green "migrated ")
+           (log/gray "(")
+           (log/yellow (log/format-duration (:start ctx)))
+           (log/gray " sec)"))
+  ctx)
+
+
+(defn migrate-database
+  ([config] (migrate-database config (when (-> config :opts :verbose?)
+                                       {migration-start migration-start
+                                        file-start      file-start
+                                        file-done       file-done
+                                        file-migrated   file-migrated
+                                        migration-end   migration-end})))
+  ([config {:keys [migration-start
+                   file-start
+                   file-done
+                   file-migrated
+                   migration-end]
+            :or   {migration-start (constantly nil)
+                   file-start      (constantly nil)
+                   file-done       (constantly nil)
+                   file-migrated   (constantly nil)
+                   migration-end   (constantly nil)}}]
+   (let [applied-migrations (->> (get-applied-migrations config)
+                                 (reduce (fn [acc migration]
+                                           (assoc acc (:file-name migration) migration))
+                                         {}))
+         migration-files    (get-migration-files config)]
+     (when-not (seq migration-files)
+       (error! "no migration files nound"))
+     (-> (reduce (fn [ctx migration-file]
+                   (let [file-name    (:file-name migration-file)
+                         file-hash    (:file-hash migration-file)
+                         applied      (get applied-migrations file-name)
+                         applied-hash (:file-hash applied)
+                         ctx          (file-start ctx file-name)]
+                     (cond
+                       (= file-hash applied-hash)  (file-done ctx file-name)
+                       (nil? applied)              (do (apply-migration config migration-file)
+                                                       (file-migrated ctx file-name))
+                       :else (do (println)
+                                 (println (log/red "error:") " file has been changed")
+                                 (error! (format "muutto: migration file %s has been changed, migration halted" file-name))))))
+                 (migration-start (map :file-name migration-files))
+                 migration-files)
+         (migration-end)))))

@@ -4,7 +4,7 @@
 
 
 (defn init-command
-  "Init database for migrations (indempotent)"
+  "Init database for migrations: muutto init <env>"
   [config]
   (println "muutto: initializing database" (config/get config :dbname))
   (mig/init-migrations config))

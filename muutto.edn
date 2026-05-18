@@ -3,11 +3,7 @@
  :migrations   ["./test-resources/db/migrations"]
  :tests        ["./test-resources/db/tests"]
 
- :default-env  {:create  :postgres
-                :drop    :postgres
-                :migrate :dev
-                :test    :postgres}
-
+ :default-env  {:migrate :dev}
 
  :env          {:postgres {:dbname "postgres"
                            :locked true}
@@ -22,7 +18,10 @@
  :psql-wrapper "kubectl
                    --context=${config:context}
                    --namespace=${config:namespace}
-                   exec --stdin svc/db --"
+                   exec
+                     --stdin ${config:tty:}
+                     svc/db
+                     --"
 
  :context      "docker-desktop"
  :namespace    "smiley"}

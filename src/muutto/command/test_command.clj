@@ -31,116 +31,91 @@
          (mapcat find-test-files-from-dir))))
 
 
-(defmacro with-timing [step-name & body]
+(defmacro with-timing [verbose? step-name & body]
   `(let [start# (System/nanoTime)]
-     (print (log/rpad 50 (log/gray ~step-name)))
-     (flush)
+     (when ~verbose?
+       (print (log/rpad 70 (log/gray ~step-name)))
+       (flush))
      ~@body
-     (println (str (log/green " ok")
-                   (log/gray " (")
-                   (log/yellow (log/format-duration start#))
-                   (log/gray " sec)")))))
+     (when ~verbose?
+       (println (str (log/green " ok")
+                     (log/gray " (")
+                     (log/yellow (log/format-duration start#))
+                     (log/gray " sec)"))))))
 
 
 (defn test-command
-  "Run database tests"
+  "Run database tests: muutto test <env>"
   [config]
-  (let [test-db     (str "test_db_" (System/currentTimeMillis))
-        test-config (assoc config :dbname test-db)
-        test-files  (find-test-files config)
-        test-start  (System/nanoTime)]
+  (let [test-db    (str "test_db_" (System/currentTimeMillis))
+        postgres   (config/env-config config :postgres)
+        config     (assoc config :dbname test-db)
+        test-files (find-test-files config)
+        test-start (System/nanoTime)
+        verbose?   (-> config :opts :verbose)]
+    (when-not (seq test-files) (error! "muutto: no test files found"))
+    (when verbose?
+      (println "muutto: run db tests on database" (log/yellow test-db)))
 
-    (when-not (seq test-files)
-      (println "muutto: no test files found")
-      (System/exit 1))
-
-    (println "muutto: run db on database" (log/yellow test-db))
-
-    (with-timing "creating database"
-      (exec/exec config {:stmt (str "create database " test-db)}))
+    (with-timing verbose? "creating database"
+      (exec/exec postgres {:stmt (str "create database " test-db " with lc_ctype='C.UTF-8'")}))
 
     (try
-      (with-timing "initializing database"
-        (mig/init-migrations test-config))
+      (with-timing verbose? "initializing database"
+        (mig/init-migrations config))
 
-      (println (log/gray "migrating database.."))
-      (mig/migrate-database test-config {:migration-start (fn [files]
-                                                            {:migration-start (System/nanoTime)
-                                                             :file-count      (count files)
-                                                             :file-col-len    (->> (map count files)
-                                                                                   (reduce max 0)
-                                                                                   (+ 2))})
-                                         :migration-end   (fn [{:keys [migration-start file-count]}]
-                                                            (println (str (log/gray "migrated ")
-                                                                          (log/green file-count)
-                                                                          (log/gray " files in ")
-                                                                          (log/yellow (log/format-duration migration-start))
-                                                                          (log/gray " sec"))))
-                                         :file-start      (fn [ctx file]
-                                                            (let [file-col-len (:file-col-len ctx)]
-                                                              (print "  " (log/rpad file-col-len file))
-                                                              (flush)
-                                                              (assoc ctx :start (System/nanoTime))))
-                                         :file-done       (fn [ctx _file]
-                                                            (println (str (log/yellow "passed   ")
-                                                                          (log/gray "(")
-                                                                          (log/yellow (log/format-duration (:start ctx)))
-                                                                          (log/gray " sec)")))
-                                                            ctx)
-                                         :file-migrated   (fn [ctx _file]
-                                                            (println (log/green "migrated ")
-                                                                     (log/gray "(")
-                                                                     (log/yellow (log/format-duration (:start ctx)))
-                                                                     (log/gray " sec)"))
-                                                            ctx)})
+      (when verbose?
+        (println (log/gray "migrating database...")))
+      (mig/migrate-database config)
 
-      (with-timing "installing PGUnit"
+      (with-timing verbose? "installing PGUnit"
         ;; TODO: Download and cache pg unit. Or use config?
-        (exec/exec test-config {:args ["--single-transaction"]
-                                :stmt ["create schema pgunit"
-                                       "create schema test"
-                                       "create extension if not exists dblink schema pgunit"
-                                       "set local search_path to pgunit, public"
-                                       (io/file "pgunit.sql")]}))
+        (exec/exec config {:args ["--single-transaction"]
+                           :stmt ["create schema pgunit"
+                                  "create schema test"
+                                  "create extension if not exists dblink schema pgunit"
+                                  "set local search_path to pgunit, public"
+                                  (io/file "pgunit.sql")]}))
 
       (let [start (System/nanoTime)]
-        (println (log/gray "installing tests..."))
+        (when verbose?
+          (println (log/gray "installing tests...")))
         (doseq [test-file test-files]
-          (with-timing (str "  " test-file)
-            (exec/exec test-config {:args ["--single-transaction"]
-                                    :stmt ["set local search_path to test, pgunit, public"
-                                           test-file]})))
-        (println (str (log/gray "installed ")
-                      (log/green (count test-files))
-                      (log/gray " tests in ")
-                      (log/yellow (log/format-duration start))
-                      (log/gray " sec"))))
+          (with-timing verbose? (str "  " test-file)
+            (exec/exec config {:args ["--single-transaction"]
+                               :stmt ["set local search_path to test, pgunit, public"
+                                      test-file]})))
+        (when verbose?
+          (println (str (log/gray "installed ")
+                        (log/green (count test-files))
+                        (log/gray " tests in ")
+                        (log/yellow (log/format-duration start))
+                        (log/gray " sec")))))
 
       (let [start (System/nanoTime)]
-        (println (log/gray "running tests..."))
-        (let [resp (exec/exec test-config {:args ["--csv"]
-                                           :stmt ["select
-                                                     test_name,
-                                                     successful,
-                                                     failed,
-                                                     error_message,
-                                                     to_char(duration, 'SS.FF3')
-                                                   from
-                                                     pgunit.test_run_all()"]})]
+        (when verbose? (println (log/gray "running tests...")))
+        (let [resp (exec/exec config {:args ["--csv"]
+                                      :stmt ["select
+                                                test_name,
+                                                successful,
+                                                failed,
+                                                error_message,
+                                                to_char(duration, 'SS.FF3')
+                                              from
+                                                pgunit.test_run_all()"]})]
           (doseq [[test-name success fail err-msg duration] (->> (csv/read-csv resp) (rest))]
             (let [status (cond
                            (= success "t") :ok
                            (= fail "t")    :fail
                            :else           :error)]
-              (println (str "  "
-                            (log/color (case status
+              (println (str (log/color (case status
                                          :ok   log/color-white
                                          :fail log/color-yellow
                                          log/color-red)
-                                       (log/rpad 36 test-name))
+                                       (log/rpad 58 test-name))
                             (case status
-                              :ok    (log/green " ok    ")
-                              :fail  (log/red   " fail  ")
+                              :ok    (log/green " ok ")
+                              :fail  (log/red   " fail ")
                               :error (log/red   " error "))
                             (log/gray "(")
                             (log/yellow duration)
@@ -148,9 +123,10 @@
               (when (and (not= status :ok) err-msg)
                 (doseq [line (str/split-lines err-msg)]
                   (println "    " (log/yellow line))))))
-          (println (str (log/gray "tests run in ")
-                        (log/yellow (log/format-duration start))
-                        (log/gray " sec")))))
+          (when verbose?
+            (println (str (log/gray "tests run in ")
+                          (log/yellow (log/format-duration start))
+                          (log/gray " sec"))))))
 
       (catch Exception e
         (println)
@@ -159,10 +135,11 @@
                  (log/gray (-> e (.getClass) (.getName))))
         (.printStackTrace e System/err))
       (finally
-        (with-timing "dropping test database"
-          (exec/exec config {:stmt [(str "drop database " test-db)]}))))
-    (println (str (log/gray "total time: ")
-                  (log/yellow (log/format-duration test-start))
-                  (log/gray " sec")))))
+        (with-timing verbose? "dropping test database"
+          (exec/exec postgres {:stmt [(str "drop database " test-db)]}))))
+    (when verbose?
+      (println (str (log/gray "total time: ")
+                    (log/yellow (log/format-duration test-start))
+                    (log/gray " sec"))))))
 
 

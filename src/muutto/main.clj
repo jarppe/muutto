@@ -14,10 +14,7 @@
 
 
 (def cli-spec
-  {:spec     {:env     {:desc     "Database environment (default is \"dev\")"
-                        :alias    :e
-                        :coerce   :keyword}
-              :config  {:desc     "Config file name (default is muutto.edn)"
+  {:spec     {:config  {:desc     "Config file name (default is muutto.edn)"
                         :alias    :c
                         :coerce   :string
                         :validate (comp File/.canRead io/file)}
@@ -25,6 +22,8 @@
                         :alias  :v
                         :coerce :boolean}
               :dry-run {:desc   "Dry run, don't actually execute anything"
+                        :coerce :boolean}
+              :migrate {:desc   "Migrate created database (applies to `create` command only)"
                         :coerce :boolean}
               :help    {:desc   "Show help"
                         :alias  :h
@@ -49,22 +48,28 @@
                     #'psql-command
                     #'test-command]
                    (map (fn [v]
-                          {:name    (-> v (meta) :name (name) (str/split #"-") (first))
-                           :doc     (-> v (meta) :doc)
-                           :command @v}))))
+                          {:command v
+                           :name    (-> v (meta) :name (name) (str/split #"-") (first))
+                           :doc     (-> v (meta) :doc)}))))
 
 
 (defn help! []
   (println "muutto - Database migrations the easy way")
-  (println "usage: muutto <command> <args>")
-  (println "command:")
+  (println "usage: muutto [<opts>] <command> <env> [<args>]")
+  (println "where:")
+  (println "  opts:")
+  (doseq [line (-> (cli/format-opts (merge cli-spec {:order (vec (keys (:spec cli-spec)))}))
+                   (str/split-lines))]
+    (println "   " line))
+  (println "  command:")
   (doseq [{:keys [name doc]} commands]
-    (println (format "  %s %s %s"
+    (println (format "    %s %s %s"
                      name
                      (str/join (repeat (- 10 (count name)) "-"))
                      doc)))
-  (println "args:")
-  (println (cli/format-opts (merge cli-spec {:order (vec (keys (:spec cli-spec)))})))
+  (println "")
+  (println "All commands require a target database environment to operate on. The database")
+  (println "environments are defined in `muutto.edn` configuration file.")
   (println "")
   (println "For more complete documentation see https://codeberg.org/jarppe/muutto")
   (System/exit 0))
@@ -81,7 +86,6 @@
                               command))
                           commands)
                     (error! (str "unknown command: " action)))
-        config  (-> (config/load-config opts)
-                    (config/command-config (keyword action)))]
+        config  (config/load-config opts)]
     (command config)))
 

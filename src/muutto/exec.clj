@@ -19,6 +19,7 @@
 (defn exec [config {:keys [args stmt]}]
   (let [psql    (str/join " " [(config/get config :psql-wrapper)
                                (config/get config :psql-command)])
+        tty?    (-> config :tty)
         stmts   (if (sequential? stmt) stmt [stmt])
         input   (let [inputs (keep to-input stmt)]
                   (when (> (count inputs) 1)
@@ -29,19 +30,20 @@
                                          ["--file" "-"]
                                          ["--command" stmt]))
                                      stmts))
-        _       (when (-> config :opts :verbose)
-                  (println "muutto: execute:" psql (str/join " " args)))
         process (if (-> config :opts :dry-run)
-                  {:exit 0
-                   :out  "Dry run"}
-                  (apply p/shell {:in       input
-                                  :out      :string
-                                  :err      :string
+                  (do (println "muutto: execute:" psql (str/join " " args))
+                      {:exit 0
+                       :out  ""})
+                  (apply p/shell {:in       (if tty? :inherit input)
+                                  :out      (if tty? :inherit :string)
+                                  :err      (if tty? :inherit :string)
                                   :continue true}
                          psql
                          args))]
     (if (zero? (:exit process))
-      (:out process)
+      (if tty?
+        ""
+        (:out process))
       (do (.println System/err (str "psql error: " (:err process)))
           (case (:on-error config :exit)
             :exit     (System/exit 1)

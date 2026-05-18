@@ -21,30 +21,48 @@
 (defn- deep-merge [& maps]
   (apply merge-with
          (fn [left right]
-           (if (map? left)
-             (deep-merge left right)
-             (if (nil? right)
-               left
-               right)))
+           (cond
+             (map? left)    (deep-merge left right)
+             (vector? left) (into left (if (sequential? right) right [right]))
+             (nil? right)   left
+             :else          right))
          (filter some? maps)))
 
 
 (defn load-config [{:keys [args opts]}]
-  (deep-merge default-config
-              (when-let [config-file (or (let [config-file-name (-> opts :config)]
-                                           (when-let [config-file (and config-file-name (io/file config-file-name))]
-                                             (when-not (.canRead config-file)
-                                               (error! "can't find config file: " config-file-name))
-                                             config-file))
-                                         (let [config-file (io/file "muutto.edn")]
-                                           (when (.canRead config-file)
-                                             config-file)))]
-                (with-open [in (-> config-file
-                                   (io/reader)
-                                   (java.io.PushbackReader.))]
-                  (edn/read in)))
-              {:opts opts
-               :args args}))
+  (let [command    (-> args (first) (keyword))
+        args       (rest args)
+        config     (deep-merge default-config
+                               (when-let [config-file (or (let [config-file-name (-> opts :config)]
+                                                            (when-let [config-file (and config-file-name (io/file config-file-name))]
+                                                              (when-not (.canRead config-file)
+                                                                (error! "can't find config file: " config-file-name))
+                                                              config-file))
+                                                          (let [config-file (io/file "muutto.edn")]
+                                                            (when (.canRead config-file)
+                                                              config-file)))]
+                                 (with-open [in (-> config-file
+                                                    (io/reader)
+                                                    (java.io.PushbackReader.))]
+                                   (edn/read in)))
+                               {:opts opts
+                                :args (rest args)})
+        env        (or (-> args (first) (keyword))
+                       (-> config :default-env command)
+                       (when (= command :test)
+                         :postgres)
+                       (error! "environment is required"))
+        env-config (or (-> config :env env)
+                       (error! "unknown environment: " (name env)))] 
+    (deep-merge config
+                env-config)))
+
+
+(defn env-config [config env]
+  (let [env-config (get-in config [:env env])]
+    (when-not env-config
+      (error! "unknown database environment: " (name env)))
+    (deep-merge config env-config)))
 
 
 (defn get [config k & km]
@@ -53,7 +71,7 @@
                                     (cons k km)))]
     (if (string? value)
       (str/replace value
-                   #"\$\{([a-z]+):([^}:]+)(?::([^}]+))?\}"
+                   #"\$\{([a-z]+):([^}:]+)(?::([^}]*))?\}"
                    (fn [[_ exp-type exp-name default]]
                      (or (case exp-type
                            "env"    (System/getenv exp-name)
@@ -66,18 +84,7 @@
       value)))
 
 
-(defn env-config [config env]
-  (let [env-config (get-in config [:env env])]
-    (when-not env-config
-      (error! "unknown database environment: " (name env)))
-    (deep-merge config env-config)))
 
-
-(defn command-config [config command]
-  (let [env (or (get-in config [:opts :env])
-                (get-in config [:default-env command])
-                (error! "command " (name command) " requires database environment, use --env option"))]
-    (env-config config env)))
 
 
 (comment
