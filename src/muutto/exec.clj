@@ -44,7 +44,11 @@
       (if tty?
         ""
         (:out process))
-      (do (.println System/err (str "psql error: " (:err process)))
+      (do (.println System/err (str "psql error:" 
+                                    "\nstderr: "
+                                    (:err process)
+                                    "\nstdout: "
+                                    (:out process)))
           (case (:on-error config :exit)
             :exit     (System/exit 1)
             :throw    (throw (ex-info "psql exec failed" {:type :process-error

@@ -1,0 +1,50 @@
+---
+services:
+  db:
+    image: postgres:18-alpine
+    init: true
+    depends_on:
+      - init-data
+    restart: on-failure
+    environment:
+      - POSTGRES_DATABASE=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
+    volumes:
+      - type: volume
+        target: /var/lib/postgresql
+        source: data
+        volume:
+          subpath: db
+
+  # proxy:
+  #   image: nginx:1-alpine
+  #   init: true
+  #   restart: on-failure
+  #   mem_limit: 256MB
+  #   command: ["nginx", "-g", "daemon off;"]
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - type: volume
+  #       target: /http/public
+  #       source: data
+  #       volume:
+  #         subpath: http
+  #   ports:
+  #     - 127.0.0.1:8080:8080
+
+  init-data:
+    image: debian:13-slim
+    init: true
+    restart: on-failure
+    command: >
+      bash -c "for d in db http; do
+                 install -m 777 -d /data/$$d;
+               done"
+    volumes:
+      - data:/data
+
+volumes:
+  data:

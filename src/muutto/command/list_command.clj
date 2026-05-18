@@ -8,23 +8,30 @@
 (defn list-command
   "List migrations: muutto list <env>"
   [config]
-  (let [dbname (config/get config :dbname)]
+  (let [dbname   (config/get config :dbname)
+        verbose? (config/get config :opts :verbose)]
     (when-not (mig/db-initialized? config)
       (error! "database in " (log/yellow dbname) " is not initialized for migrations, use " (log/yellow "muutto init") " command."))
-    (println "muutto: listing database" (log/yellow dbname) "migrations")
+    (when verbose? 
+      (println "muutto: listing database" (log/yellow dbname) "migrations"))
     (let [applied-at      (->> (mig/get-applied-migrations config)
                                (reduce (fn [acc {:keys [file-name applied]}]
                                          (assoc acc file-name applied))
                                        {}))
           migration-files (->> (mig/get-migration-files config)
                                (map :file-name))
-          table-printer   (log/table-printer (->> migration-files
-                                                  (map count)
-                                                  (reduce max 0)
-                                                  (+ 2))
-                                             10)]
-      (table-printer "File:" "Applied:")
-      (table-printer)
+          file-col-len (->> migration-files
+                            (map count)
+                            (reduce max 0)
+                            (+ 2))
+          table-printer   (if verbose?
+                            (log/table-printer file-col-len 20)
+                            (fn [file-name applied]
+                              (println (str (log/rpad file-col-len file-name)
+                                            applied))))]
+      (when verbose?
+        (table-printer "File:" "Applied:")
+        (table-printer))
       (doseq [file-name migration-files]
         (let [applied (-> file-name applied-at (u/format-datetime))]
           (table-printer file-name

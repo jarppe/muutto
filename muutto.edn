@@ -7,21 +7,17 @@
 
  :env          {:postgres {:dbname "postgres"
                            :locked true}
+                :dev      {:dbname "hello_dev"} 
+                :prod     {:dbname    "heello_prod"}}
 
-                :dev      {:dbname "smiley"}
+ ;; :psql-wrapper "kubectl
+ ;;                   --context=${config:context}
+ ;;                   --namespace=${config:namespace}
+ ;;                   exec
+ ;;                     --stdin ${config:tty:}
+ ;;                     svc/db
+ ;;                     --"
 
-                :test     {}
-
-                :prod     {:dbname    "smiley-prod"
-                           :namespace "smiley-prod"}}
-
- :psql-wrapper "kubectl
-                   --context=${config:context}
-                   --namespace=${config:namespace}
-                   exec
-                     --stdin ${config:tty:}
-                     svc/db
-                     --"
-
+ :psql-wrapper "docker compose exec db"
  :context      "docker-desktop"
  :namespace    "smiley"}
