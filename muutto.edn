@@ -1,15 +1,27 @@
-{:username     "postgres"
+;; For local testing
 
- :migrations   ["./test-resources/db/migrations"]
- :tests        ["./test-resources/db/tests"]
-
- :default-env  {:migrate :dev}
-
+{:migrations   ["./test-resources/db/migrations"]
+ :tests        ["./test-resources/db/test/tests"]
+ :username     "postgres"
+ :default-env  {:migrate :dev
+                :test    :test}
  :env          {:postgres {:dbname "postgres"
                            :locked true}
-                :dev      {:dbname "hello_dev"} 
-                :prod     {:dbname    "heello_prod"}}
+                :dev      {:dbname "hello_dev"}
+                :test     {:dbname     "hello_test"
+                           :migrations ["./test-resources/db/test/migrations"]}
+                :prod     {:dbname    "hello_prod"
+                           :protected true}}
+ :psql-wrapper "rlwrap --always-readline 
+                       --no-children
+                       --prompt-colour=Blue
+                       --multi-line
+                       --multi-line-ext=.sql 
+                  docker compose exec db"
+ :opts         {:verbose true}
 
+ ;; :context      "docker-desktop"
+ ;; :namespace    "smiley"
  ;; :psql-wrapper "kubectl
  ;;                   --context=${config:context}
  ;;                   --namespace=${config:namespace}
@@ -17,7 +29,4 @@
  ;;                     --stdin ${config:tty:}
  ;;                     svc/db
  ;;                     --"
-
- :psql-wrapper "docker compose exec db"
- :context      "docker-desktop"
- :namespace    "smiley"}
+ }

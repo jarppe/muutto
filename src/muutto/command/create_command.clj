@@ -9,12 +9,9 @@
   "create database: muutto create <env>"
   [config]
   (let [postgres (config/env-config config :postgres)
-        locked?  (config/get config :locked)
         dbname   (config/get config :dbname)
         migrate? (config/get config :opts :migrate)
         verbose? (config/get config :opts :verbose)]
-    (when locked?
-      (error! "database is locked"))
     (when-not dbname
       (error! "database is missing \"dbname\" configuration"))
     (when verbose?
@@ -28,12 +25,15 @@
 (defn drop-command
   "drop database: muutto drop <env>"
   [config]
-  (let [postgres (config/env-config config :postgres)
-        locked?  (config/get config :locked)
-        dbname   (config/get config :dbname)
-        verbose? (config/get config :opts :verbose)]
+  (let [postgres   (config/env-config config :postgres)
+        dbname     (config/get config :dbname)
+        verbose?   (config/get config :opts :verbose)
+        locked?    (config/get config :locked)
+        protected? (config/get config :protected)]
     (when locked?
       (error! "database is locked"))
+    (when protected?
+      (error! "database is protected"))
     (when-not dbname
       (error! "database is missing \"dbname\" configuration"))
     (when verbose?

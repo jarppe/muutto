@@ -5,13 +5,15 @@
             [muutto.config :as config]
             [muutto.util :as u :refer [error!]])
   (:import (java.io File)
-           (java.nio.file Path)))
+           (java.nio.file Path)
+           (java.net URL)))
 
 
 (defn to-input [v]
   (cond
     (instance? File v) v
     (instance? Path v) (.toFile v)
+    (instance? URL v)  (io/file v)
     (and (string? v) (str/starts-with? v "@")) (io/file (subs v 1))
     :else nil))
 
@@ -44,10 +46,8 @@
       (if tty?
         ""
         (:out process))
-      (do (.println System/err (str "psql error:" 
-                                    "\nstderr: "
-                                    (:err process)
-                                    "\nstdout: "
+      (do (.println System/err (str "psql error:\n" 
+                                    (:err process) "\n"
                                     (:out process)))
           (case (:on-error config :exit)
             :exit     (System/exit 1)

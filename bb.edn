@@ -1,18 +1,2 @@
-{:paths    ["src"]
- :bbin/bin {muutto {:main-opts ["-f" "muutto"]}}
- :deps     {org.babashka/cli {:mvn/version "0.8.67"}}
- :tasks    {dev:init   {:doc  "Initialize project for development"
-                        :task (println "Ready")}
-            ;;
-            ;; =================================================================================
-            ;; Testing:
-            ;; =================================================================================
-            ;;
-
-
-            test:unit  {:doc  "Run unit tests"
-                        :task (apply clojure "-M:test -m kaocha.runner --reporter kaocha.report/dots" *command-line-args*)}
-
-
-            test:watch {:doc  "Run unit tests in watch mode"
-                        :task (clojure "-M:test -m kaocha.runner --reporter kaocha.report/dots --fail-fast --watch")}}}
+{:bbin/bin {muutto {:main-opts ["-f" "muutto"]}}
+ :paths    ["src" "resources"]}

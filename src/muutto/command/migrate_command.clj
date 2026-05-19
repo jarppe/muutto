@@ -4,6 +4,5 @@
 
 (defn migrate-command
   "Migrate database: muutto migrate <env>"
-  [config]
-  (println "muutto: migrating database" (:dbname config))
+  [config] 
   (mig/migrate-database config))  

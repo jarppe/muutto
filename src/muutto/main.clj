@@ -25,6 +25,8 @@
                         :coerce :boolean}
               :migrate {:desc   "Migrate created database (applies to `create` command only)"
                         :coerce :boolean}
+              :force   {:desc   "Force migrate file hash update"
+                        :coerce :boolean}
               :help    {:desc   "Show help"
                         :alias  :h
                         :coerce :boolean}}

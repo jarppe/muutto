@@ -14,27 +14,27 @@
       (error! "database in " (log/yellow dbname) " is not initialized for migrations, use " (log/yellow "muutto init") " command."))
     (when verbose? 
       (println "muutto: listing database" (log/yellow dbname) "migrations"))
-    (let [applied-at      (->> (mig/get-applied-migrations config)
-                               (reduce (fn [acc {:keys [file-name applied]}]
-                                         (assoc acc file-name applied))
-                                       {}))
-          migration-files (->> (mig/get-migration-files config)
-                               (map :file-name))
-          file-col-len (->> migration-files
-                            (map count)
-                            (reduce max 0)
-                            (+ 2))
-          table-printer   (if verbose?
-                            (log/table-printer file-col-len 20)
-                            (fn [file-name applied]
-                              (println (str (log/rpad file-col-len file-name)
-                                            applied))))]
-      (when verbose?
-        (table-printer "File:" "Applied:")
-        (table-printer))
-      (doseq [file-name migration-files]
-        (let [applied (-> file-name applied-at (u/format-datetime))]
-          (table-printer file-name
-                         (if applied
-                           (log/green applied)
-                           (log/yellow "pending"))))))))
+    (let [applied-at          (->> (mig/get-applied-migrations config)
+                                   (reduce (fn [acc {:keys [file-name applied]}]
+                                             (assoc acc file-name applied))
+                                           {}))
+          all-migration-files (mig/get-migration-files config)
+          file-col-len        (->> (apply concat all-migration-files)
+                                   (map (comp count :file-name))
+                                   (reduce max 0)
+                                   (+ 2))
+          table-printer       (if verbose?
+                                (log/table-printer file-col-len 20)
+                                (fn [file-name applied]
+                                  (println (str (log/rpad file-col-len file-name)
+                                                applied))))]
+      (doseq [migration-files all-migration-files]
+        (when verbose?
+          (table-printer "File:" "Applied:")
+          (table-printer))
+        (doseq [file-name (map :file-name migration-files)]
+          (let [applied (-> file-name applied-at (u/format-datetime))]
+            (table-printer file-name
+                           (if applied
+                             (log/green applied)
+                             (log/yellow "pending")))))))))

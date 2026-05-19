@@ -11,15 +11,26 @@
 (def cwd (u/to-path "."))
 
 
-(defn init-migrations [config]
-  (let [mig-table (config/get config :table)
-        mig-shema (-> mig-table (str/split  #"\.") (first))]
-    (exec/exec config {:stmt [(str "create schema if not exists " mig-shema)
-                              (str "create table if not exists " mig-table " (
-                                      file_name   text         not null primary key,
-                                      file_hash   text         not null,
-                                      applied     timestamptz  not null default now()
-                                    )")]})))
+(defn db-exists? [config dbname] 
+  (-> (exec/exec config {:args ["--csv"]
+                         :stmt (str "select exists (select 1 from pg_database where datname = '" dbname "')")})
+      (str/split #"\n")
+      (second)
+      (= "t")))
+
+
+(defn db-type-exists? [config type-schema type-name]
+  (-> (exec/exec config {:args ["--csv"]
+                         :stmt (str "select exists (
+                                       select 1 from information_schema.user_defined_types
+                                       where
+                                         user_defined_type_schema = '" type-schema "'
+                                         and
+                                         user_defined_type_name = '" type-name "'
+                                     )")})
+      (str/split #"\n")
+      (second)
+      (= "t")))
 
 
 (defn db-initialized? [config]
@@ -38,6 +49,17 @@
         (str/split #"\n")
         (second)
         (= "t"))))
+
+
+(defn init-migrations [config]
+  (let [mig-table (config/get config :table)
+        mig-shema (-> mig-table (str/split  #"\.") (first))]
+    (exec/exec config {:stmt [(str "create schema if not exists " mig-shema)
+                              (str "create table if not exists " mig-table " (
+                                      file_name   text         not null primary key,
+                                      file_hash   text         not null,
+                                      applied     timestamptz  not null default now()
+                                    )")]})))
 
 
 (defn get-applied-migrations [config]
@@ -69,10 +91,11 @@
                                      (or (str/blank? line)
                                          (str/starts-with? line "--"))))
                        (mapcat (fn [line]
-                                 (some-> (re-matches #"--\s+requires:\s+(.*)" line)
-                                         (second)
-                                         (str/split #"\s+"))))
-                       (map (fn [require] 
+                                 (when-let [[match action args] (re-matches #"\s*--\s*muutto:([a-z\-]+):\s+(.*)" line)]
+                                   (case action
+                                     "requires" (str/split args #"\s+")
+                                     (error! "unknown sql comment declaration:" match)))))
+                       (map (fn [require]
                               (->> (.resolve dir require)
                                    (.relativize cwd)))))]
     {:file      file
@@ -84,7 +107,7 @@
 (defn find-migration-files-from-dir [dir]
   (let [f (.toFile dir)]
     (when-not (.exists f)
-      (error! "can't find migration files directory " (str dir)))
+      (error! "can't find migration files directory " (pr-str dir)))
     (when-not (.isDirectory f)
       (error! (str dir) " is not directory")))
   (->> (Files/list dir)
@@ -92,10 +115,6 @@
        (iterator-seq)
        (filter #(str/ends-with? (str %) ".sql"))
        (map parse-migration-file)))
-
-
-(defn find-migration-files [dirs]
-  (mapcat find-migration-files-from-dir dirs))
 
 
 (defn assert-requires-resolved [migration-files]
@@ -107,13 +126,6 @@
                             (seq))]
       (error! "requied files missing: " (str/join ", " (map str missing))))
     migration-files))
-
-
-(comment
-  (-> (find-migration-files [(u/to-path "test-resources/db/migrations")])
-      (assert-requires-resolved))
-  ;
-  )
 
 
 (defn- apply-migration [config {:keys [file-name file-hash file]}]
@@ -162,13 +174,13 @@
 
 (defn get-migration-files [config]
   (let [migration-dirs (config/get config :migrations)]
-    (->> (if (sequential? migration-dirs)
-           migration-dirs
-           [migration-dirs])
-         (map u/to-path)
-         (find-migration-files)
-         (assert-requires-resolved)
-         (sort-files))))
+    (for [migration-dir (if (sequential? migration-dirs)
+                          migration-dirs
+                          [migration-dirs])]
+      (->> (u/to-path migration-dir)
+           (find-migration-files-from-dir)
+           (assert-requires-resolved)
+           (sort-files)))))
 
 
 (comment
@@ -201,7 +213,7 @@
 
 
 (defn file-done [ctx _file]
-  (println (str (log/yellow "passed   ")
+  (println (str (log/yellow "skipped  ")
                 (log/gray "(")
                 (log/yellow (log/format-duration (:start ctx)))
                 (log/gray " sec)")))
@@ -209,20 +221,20 @@
 
 
 (defn file-migrated [ctx _file]
-  (println (log/green "migrated ")
-           (log/gray "(")
-           (log/yellow (log/format-duration (:start ctx)))
-           (log/gray " sec)"))
+  (println (str (log/green "migrated ")
+                (log/gray "(")
+                (log/yellow (log/format-duration (:start ctx)))
+                (log/gray " sec)")))
   ctx)
 
 
 (defn migrate-database
-  ([config] (migrate-database config (when (-> config :opts :verbose?)
-                                       {migration-start migration-start
-                                        file-start      file-start
-                                        file-done       file-done
-                                        file-migrated   file-migrated
-                                        migration-end   migration-end})))
+  ([config] (migrate-database config (when (-> config :opts :verbose)
+                                       {:migration-start migration-start
+                                        :file-start      file-start
+                                        :file-done       file-done
+                                        :file-migrated   file-migrated
+                                        :migration-end   migration-end})))
   ([config {:keys [migration-start
                    file-start
                    file-done
@@ -233,26 +245,49 @@
                    file-done       (constantly nil)
                    file-migrated   (constantly nil)
                    migration-end   (constantly nil)}}]
-   (let [applied-migrations (->> (get-applied-migrations config)
-                                 (reduce (fn [acc migration]
-                                           (assoc acc (:file-name migration) migration))
-                                         {}))
-         migration-files    (get-migration-files config)]
-     (when-not (seq migration-files)
-       (error! "no migration files nound"))
-     (-> (reduce (fn [ctx migration-file]
-                   (let [file-name    (:file-name migration-file)
-                         file-hash    (:file-hash migration-file)
-                         applied      (get applied-migrations file-name)
-                         applied-hash (:file-hash applied)
-                         ctx          (file-start ctx file-name)]
-                     (cond
-                       (= file-hash applied-hash)  (file-done ctx file-name)
-                       (nil? applied)              (do (apply-migration config migration-file)
-                                                       (file-migrated ctx file-name))
-                       :else (do (println)
-                                 (println (log/red "error:") " file has been changed")
-                                 (error! (format "muutto: migration file %s has been changed, migration halted" file-name))))))
-                 (migration-start (map :file-name migration-files))
-                 migration-files)
-         (migration-end)))))
+   (let [postgres        (config/env-config config :postgres)
+         dbname          (config/get config :dbname)
+         locked?         (config/get config :locked)
+         verbose?        (config/get config :opts :verbose)]
+     (when verbose?
+       (println "muutto: migrating database" (log/yellow dbname)))
+     (when locked?
+       (error! "database is locked"))
+     (when-not (db-exists? postgres dbname)
+       (when verbose?
+         (print (log/gray (log/rpad 25 "creating database")))) (flush)
+       (exec/exec postgres {:stmt (str "create database " dbname)})
+       (when verbose?
+         (println (log/green "ok"))))
+     (when-not (db-initialized? config)
+       (when verbose?
+         (print (log/gray (log/rpad 25 "initializing database")))) (flush)
+       (init-migrations config)
+       (when verbose?
+         (println (log/green "ok"))))
+     (let [all-migration-files (get-migration-files config)
+           applied-migrations  (->> (get-applied-migrations config)
+                                    (reduce (fn [acc migration]
+                                              (assoc acc (:file-name migration) migration))
+                                            {}))]
+       (doseq [migration-files all-migration-files]
+         (-> (reduce (fn [ctx migration-file]
+                       (let [file-name    (:file-name migration-file)
+                             file-hash    (:file-hash migration-file)
+                             applied      (get applied-migrations file-name)
+                             applied-hash (:file-hash applied)
+                             ctx          (file-start ctx file-name)]
+                         (cond
+                           (= file-hash applied-hash)  (file-done ctx file-name)
+                           (nil? applied)              (do (apply-migration config migration-file)
+                                                           (file-migrated ctx file-name))
+                           :else (do (println (log/red "error:") "SQL migration file" (log/yellow file-name) "file has been changed")
+                                     (println "  migrated file hash:" (log/yellow applied-hash))
+                                     (println "   current file hash:" (log/red file-hash))
+                                     (println "If you know what you are doing you can force the file")
+                                     (println "hash update with option:" (log/yellow "--force"))
+                                     (println "muutto: migration halted")
+                                     (System/exit 1)))))
+                     (migration-start (map :file-name migration-files))
+                     migration-files)
+             (migration-end)))))))
