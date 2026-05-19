@@ -45,8 +45,7 @@ Create `muutto.edn` configuration file:
  :default-env  {:migrate :dev
                 :test    :test}
  :psql-wrapper "docker compose exec db"
- :opts         {:verbose true}
-}
+ :opts         {:verbose true}}
 ```
 
 The above configuration explained:
@@ -299,8 +298,6 @@ muutto: migrating database hello_dev
    resources/db/migrations/passwords.sql  error: SQL migration file resources/db/migrations/passwords.sql file has been changed
   migrated file hash: a4aefc4596fa1155392b3ca12d9833d0d59da261208e3277d70273f78a70b4a7
    current file hash: 24c514a7a6ece58d3fbe75a2597728d11f0fb9e38d92397ffe855f62ed371159
-If you know what you are doing you can force the file
-hash update with option: --force
 muutto: migration halted
 ```
 
@@ -532,7 +529,7 @@ total time: 0.857 sec
 
 Everything works as expected.
 
-### Manually creating and initializinmg databases
+### Manually creating databases
 
 ```bash
 $ muutto create dev
