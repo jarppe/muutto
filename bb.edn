@@ -1,2 +1,2 @@
-{:bbin/bin {muutto {:main-opts ["-f" "muutto"]}}
+{:bbin/bin {muutto {:main-opts ["-m" "muutto.main"]}}
  :paths    ["src" "resources"]}

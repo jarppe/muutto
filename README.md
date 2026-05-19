@@ -1,8 +1,42 @@
 # muutto - Database migrations the easy way
 
-## Use
+Simple, but pretty flexible, database migration and testing tool.
 
-It's probably easiest to explain this by examples.
+## Installation
+
+Requires [Babashka](https://github.com/babashka/babashka/) and [bbin](https://github.com/babashka/bbin).
+
+Install with `bbin`:
+
+```bash
+$ bbin install https://codeberg.org/jarppe/muutto
+```
+
+## Rationale
+
+There are many database migration tools and libraries, but I wanted something little bit different. So here's `muutto` command-line tool.
+
+In a nutshell:
+- Command-line tool
+- Uses standard Postgres `psql` command-line
+- Forward only, no "down" scripts
+- Itegrated [PGunit](https://github.com/adrianandrei-ca/pgunit) test library
+
+Being a command-line tool makes this pretty easy to use for AI agents too.
+
+Using `psql` as an interface allows writing migrations in plain SQL, no special syntax, no magic comments to separate statements, etc.
+
+### Why no down migrations
+
+The "forward only" is based on my experience. In all my years in developing sofware (since 1982) I have never done down migrations.
+
+Few times the migrations have failed to work in production, but even then I did not do down migrations.
+
+Why? I knew that we had tested the down migrations on test database. But we also had tested the up migration, and if that somehow still failed in prod, I did not have the confidence that the down migrations would work as tested. So I just fixed the problem, and migrated again.
+
+## Usage
+
+It's probably easiest to explain this by example.
 
 Let's assume that you have PostgreSQL running in docker container, like this:
 
