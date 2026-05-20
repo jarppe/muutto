@@ -1,2 +1,37 @@
 {:bbin/bin {muutto {:main-opts ["-f" "muutto"]}}
- :paths    ["src" "resources"]}
+ :paths    ["src" "resources"]
+
+ :tasks    {tag:current {:doc      "Print current release info"
+                         :requires ([clojure.string :as str]
+                                    [babashka.process :as p])
+                         :task     (let [[tag sha] (let [tag (-> (p/shell {:out :string} "git tag --sort=-taggerdate")
+                                                                 :out
+                                                                 (str/split-lines)
+                                                                 (first))
+                                                         sha (-> (p/shell {:out :string} (format "git rev-parse --short %s^{commit}" tag))
+                                                                 :out
+                                                                 (str/trim))]
+                                                     [tag sha])]
+                                     (println "tag:" tag)
+                                     (println "sha:" sha))}
+
+            tag:new     {:doc      "Make new release tag"
+                         :requires ([clojure.string :as str]
+                                    [babashka.process :as p])
+                         :task     (let [[version message] *command-line-args*]
+                                     (when-not (-> (p/process "git diff --quiet")
+                                                   (deref)
+                                                   :exit
+                                                   (zero?))
+                                       (println "error: Working directory is dirty")
+                                       (System/exit 1))
+                                     (when (str/blank? version)
+                                       (println "version is required")
+                                       (System/exit 1))
+                                     (when (str/blank? message)
+                                       (println "message is required")
+                                       (System/exit 1))
+                                     (p/shell "git tag" "-a" version "-m" message)
+                                     (p/shell "git push --tags"))}}}
+
+
