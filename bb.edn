@@ -1,3 +1,1 @@
-{:bbin/bin {muutto {:main-opts ["-f" "muutto"]}}
- :deps     {io.github.jarppe/muutto {:local/root "."}}
- :paths    ["src" "resources"]}
+{:paths ["src" "resources"]}
