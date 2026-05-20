@@ -9,7 +9,7 @@ Requires [Babashka](https://github.com/babashka/babashka/) and [bbin](https://gi
 Install with `bbin`:
 
 ```bash
-$ bbin install https://codeberg.org/jarppe/muutto
+$ bbin install io.github.jarppe/muutto
 ```
 
 ## Rationale
