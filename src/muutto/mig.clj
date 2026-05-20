@@ -4,14 +4,19 @@
             [muutto.util :as u :refer [error!]]
             [muutto.config :as config]
             [muutto.exec :as exec]
-            [muutto.log :as log])
-  (:import (java.nio.file Files)))
+            [muutto.log :as log]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io])
+  (:import (java.nio.file Files)
+           (java.nio.charset StandardCharsets)
+           (java.security MessageDigest)
+           (java.util HexFormat)))
 
 
 (def cwd (u/to-path "."))
 
 
-(defn db-exists? [config dbname] 
+(defn db-exists? [config dbname]
   (-> (exec/exec config {:args ["--csv"]
                          :stmt (str "select exists (select 1 from pg_database where datname = '" dbname "')")})
       (str/split #"\n")
@@ -80,28 +85,52 @@
                   :applied   (u/parse-datetime applied)})))))
 
 
+(def hex-format (-> (HexFormat/of)
+                    (.withLowerCase)))
+
+
 (defn parse-migration-file [file]
-  (let [file      (.relativize cwd file)
-        dir       (.getParent file)
-        file-hash (u/file-hash file)
-        requires  (->> (Files/lines file)
-                       (.iterator)
-                       (iterator-seq)
-                       (take-while (fn [line]
-                                     (or (str/blank? line)
-                                         (str/starts-with? line "--"))))
-                       (mapcat (fn [line]
-                                 (when-let [[match action args] (re-matches #"\s*--\s*muutto:([a-z\-]+):\s+(.*)" line)]
-                                   (case action
-                                     "requires" (str/split args #"\s+")
-                                     (error! "unknown sql comment declaration:" match)))))
-                       (map (fn [require]
-                              (->> (.resolve dir require)
-                                   (.relativize cwd)))))]
+  (let [file   (.relativize cwd file)
+        dir    (.getParent file)
+        digest (doto (MessageDigest/getInstance "SHA-256")
+                 (.update (Files/readAllBytes file)))
+        meta   (->> (Files/lines file)
+                    (.iterator)
+                    (iterator-seq)
+                    (take-while (fn [line]
+                                  (or (str/blank? line)
+                                      (str/starts-with? line "--"))))
+                    (reduce (fn [acc line]
+                              (if-let [[match action args] (re-matches #"\s*--\s*muutto:([a-z\-]+):\s+(.*)" line)]
+                                (assoc acc (keyword action)
+                                       (case action
+                                         "requires"    (->> (str/split args #"[\s+,]+")
+                                                            (mapv (fn [require]
+                                                                    (->> (.resolve dir require)
+                                                                         (.relativize cwd)))))
+                                         "search-path" (str/split args #"[\s+,]+")
+                                         (error! "unknown sql comment declaration:" match)))
+                                acc))
+                            {}))
+        meta   (let [meta-file (-> (str file)
+                                   (str/replace #"\.sql$" ".edn")
+                                   (io/file))]
+                 (when (.exists meta-file)
+                   (when (seq meta)
+                     (error! "migration file " (log/yellow) (str file) " has metadata in comments, " (log/red "and") " as .edn metafile")) 
+                   (let [meta (with-open [in (-> (io/reader meta-file)
+                                                 (java.io.PushbackReader.))]
+                                (edn/read in))]
+                     (.update digest (.getBytes (pr-str meta) StandardCharsets/UTF_8))
+                     (update meta :requires (partial mapv (fn [require]
+                                                            (->> (.resolve dir require)
+                                                                 (.relativize cwd))))))))
+        hash   (->> (.digest digest)
+                    (.formatHex hex-format))]
     {:file      file
      :file-name (str file)
-     :file-hash file-hash
-     :requires  requires}))
+     :file-hash hash
+     :meta      meta}))
 
 
 (defn find-migration-files-from-dir [dir]
@@ -109,31 +138,34 @@
     (when-not (.exists f)
       (error! "can't find migration files directory " (pr-str dir)))
     (when-not (.isDirectory f)
-      (error! (str dir) " is not directory")))
+      (error! (str dir) " is not directory"))) 
   (->> (Files/list dir)
        (.iterator)
        (iterator-seq)
        (filter #(str/ends-with? (str %) ".sql"))
-       (map parse-migration-file)))
+       (mapv parse-migration-file)))
 
 
 (defn assert-requires-resolved [migration-files]
   (let [file-exists? (->> migration-files
                           (map :file)
-                          (reduce conj #{}))]
-    (when-let [missing (->> (mapcat :requires migration-files)
+                          (into #{}))]
+    (when-let [missing (->> (mapcat (comp :requires :meta) migration-files)
                             (remove file-exists?)
                             (seq))]
       (error! "requied files missing: " (str/join ", " (map str missing))))
     migration-files))
 
 
-(defn- apply-migration [config {:keys [file-name file-hash file]}]
-  (let [mig-table (config/get config :table)]
+(defn- apply-migration [config {:keys [file file-name file-hash meta]}]
+  (let [mig-table   (config/get config :table)
+        search-path (:search-path meta)]
     (try
       (exec/exec (assoc config :on-error :throw)
                  {:args ["--single-transaction"]
-                  :stmt [file
+                  :stmt [(when search-path
+                           (str "set local search_path = " (str/join ", " search-path)))
+                         file
                          (format "insert into %s (file_name, file_hash) values ('%s', '%s')"
                                  mig-table
                                  file-name
@@ -151,8 +183,9 @@
         done))
 
 
-(defn- requires-in-done [{:keys [done]} {:keys [requires]}]
-  (every? (partial require-done done) requires))
+(defn- requires-in-done [{:keys [done]} file]
+  (every? (partial require-done done) 
+          (-> file :meta :requires)))
 
 
 (defn- process-files [acc file]
@@ -173,18 +206,22 @@
 
 
 (defn get-migration-files [config]
-  (let [migration-dirs (config/get config :migrations)]
-    (for [migration-dir (if (sequential? migration-dirs)
-                          migration-dirs
-                          [migration-dirs])]
-      (->> (u/to-path migration-dir)
-           (find-migration-files-from-dir)
-           (assert-requires-resolved)
-           (sort-files)))))
+  (let [migration-dirs (config/get config :migrations)
+        migration-dirs (if (sequential? migration-dirs)
+                         migration-dirs
+                         [migration-dirs])]
+    (let [files (for [migration-dir migration-dirs]
+                  (->> (u/to-path migration-dir)
+                       (find-migration-files-from-dir)
+                       (assert-requires-resolved)
+                       (sort-files)))]
+      (dorun files)
+      files)))
 
 
 (comment
-  (get-migration-files {:migrations ["test-resources/db/migrations"]})
+  (get-migration-files {:migrations ["test-resources/db/migrations"
+                                     "test-resources/db/test/migrations"]})
   ;
   )
 

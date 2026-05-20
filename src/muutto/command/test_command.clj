@@ -65,15 +65,6 @@
         (do (exec/exec postgres {:stmt (str "create database " dbname)})
             (mig/init-migrations config)
             (log/green "ok"))))
-    (with-timing verbose? "installing PGUnit"
-      (if (mig/db-type-exists? config "pgunit" "test_results")
-        (log/yellow "skip")
-        (do (exec/exec config {:args ["--single-transaction"]
-                               :stmt ["create schema if not exists pgunit"
-                                      "create extension if not exists dblink schema pgunit"
-                                      "set local search_path to pgunit, public"
-                                      (io/resource "pgunit.sql")]})
-            (log/green "ok"))))
     (when verbose?
       (println (log/gray "migrating database")))
     (mig/migrate-database config)
@@ -85,7 +76,7 @@
       (doseq [test-file test-files]
         (with-timing verbose? (str "  " test-file)
           (exec/exec config {:args ["--single-transaction"]
-                             :stmt ["set local search_path to test, pgunit, public"
+                             :stmt ["set local search_path to example, test, pgunit, public"
                                     test-file]})
           (log/green "ok")))
       (when verbose?

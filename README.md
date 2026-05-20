@@ -14,13 +14,18 @@ $ bbin install https://codeberg.org/jarppe/muutto
 
 ## Rationale
 
-There are many database migration tools and libraries, but I wanted something little bit different. So here's `muutto` command-line tool.
+There are many database migration tools and libraries, but I wanted something little different.
 
-In a nutshell:
+In a nutshell, I wanted:
+
 - Command-line tool
-- Uses standard Postgres `psql` command-line
+- Fast
+- Handle multiple database environments with simple configuration
+- Use plain Postgres SQL files
+- Utilize Postgres `psql` command-line
+- Easy support for databases that are in container or in Kubernetes
 - Forward only, no "down" scripts
-- Itegrated [PGunit](https://github.com/adrianandrei-ca/pgunit) test library
+- Easy way to run database tests, with for example [PGunit](https://github.com/adrianandrei-ca/pgunit) test library
 
 Being a command-line tool makes this pretty easy to use for AI agents too.
 
@@ -28,11 +33,13 @@ Using `psql` as an interface allows writing migrations in plain SQL, no special 
 
 ### Why no down migrations
 
-The "forward only" is based on my experience. In all my years in developing sofware (since 1982) I have never done down migrations.
+The "forward only" is based on my experiencies. In all my years in developing sofware (since 1982) I have never run down migrations. I have written them, and I have tested them, but never used them.
 
 Few times the migrations have failed to work in production, but even then I did not do down migrations.
 
-Why? I knew that we had tested the down migrations on test database. But we also had tested the up migration, and if that somehow still failed in prod, I did not have the confidence that the down migrations would work as tested. So I just fixed the problem, and migrated again.
+Why?
+
+I knew that I had tested the down migrations on test database. But I also had tested the up migration in test database. So if the "up" worked in test but not in prod, what are the changes the the "down" would work. I simply did not have the confidence that the down migrations would and not create even bigger problems. So I just fixed the problem, and migrated again.
 
 ## Usage
 
@@ -89,8 +96,8 @@ The above configuration explained:
 - The default database username to use is `postgres`
 - We have four database environments: `postgres`, `dev`, `test`, and `prod`
 - The `postgres` is locked, so you can't migrate it or drop it
+- The test has additional migrations in `resources/db/test/migrations`
 - The `prod` is protected, so you can migrarte to it, but you can not drop it
-- When using environment `test` include migrations from directory `resources/db/test/migrations`
 - The default environment for `migrate` command is `dev` and for `test` command `test`
 - Instead of running `psql` directly on host computer, run it in the docker container `db`
 - Set the `verbose` option on (same could be done from command-line using option `-v`)
@@ -127,9 +134,9 @@ $$;
 grant usage on schema example to example_app;
 ```
 
-_Note:_ The migration script has multiple statements. There is no special syntax required for including multiple statements to one migration file. In fact, you can put anything to migration file as long as the `psql` command accepts it.
+_Note:_ There is no special syntax required, this is just plain Postgres SQL.
 
-_Note:_ The reason for wrapping the role creation above is that the roles are cluster wide resources in postgres. Wrapping the role creation into try/catch allows this script to be run multiple times in different databases. Using onbe database for development and another for local testing is common. Without the try/catch the script would fail when applied to different database in same database *server*.
+_Note:_ The reason for wrapping the role creation above is that the roles are cluster wide resources in postgres. Wrapping the role creation into try/catch allows this script to be run multiple times in different databases. Without the try/catch the script would fail when applied to different database in same database *server*.
 
 `resources/db/migrations/accounts.sql`:
 
@@ -161,11 +168,11 @@ on accounts
   to example_app;
 ```
 
-_Note:_ The comment `-- muutto:requires: init.sql` is a regular comment for postgres, but it has a special meaning for `muutto`. It tells that this migration depends on the `init.sql` migration, so it this must be applied after the `init.sql`.
+_Note:_ The comment `-- muutto:requires: init.sql`. It's regular SQL comment for postgres, but it has a special meaning for `muutto`. It tells that this migration depends on the `init.sql` migration, so it this must be applied after the `init.sql`. There's another way to specify metadata if you don't wan't to use these comments, more on that later.
 
 ### Migration
 
-The moment of truth, it's time to migrate the `dev` database:
+The moment of truth, it's time to migrate this to the `dev` database:
 
 ```bash
 $ muutto migrate dev
@@ -177,7 +184,7 @@ initializing database    ok
 migrated 2 files in 0.187 sec
 ```
 
-The database was create, initilized for migrations, and two migrations were applied. Let's try the same again:
+The database was created, initilized for migrations, and two migrations were applied. Let's try the same again:
 
 ```bash
 $ muutto migrate dev
@@ -210,7 +217,7 @@ resources/db/migrations/init.sql        | 2026/05/19 19:37:00
 resources/db/migrations/accounts.sql    | 2026/05/19 19:37:00
 ```
 
-Could we make the `list` command to use database `dev` by default. Let's edit `muutto.edn` from this:
+We can make the `list` command to use database `dev` by default. Let's edit `muutto.edn` from this:
 
 ```clojure
  :default-env  {:migrate :dev
@@ -284,7 +291,7 @@ on passwords
   to example_app;
 ```
 
-Migrate the change. In `muutto.env` we have configured the default database environment for `migrate` command to be `dev`, so we don't need to specify that.
+Migrate the change. In `muutto.env` we have configured the default database environment for `migrate` command to be `dev`, so we don't need to specify it.
 
 ```bash
 $ muutto migrate
@@ -318,7 +325,7 @@ hello_dev=> ^D
 $ 
 ```
 
-Looks good. The `psql` command can do more, see the documentation for it later in this doc.
+Looks good. The `psql` command can do more, we'll cover that later.
 
 Before we go further ther's one more thing I think you should know. Open the `passwords.sql` file on your editor and make a change. Any change. Or just run: `$ echo '-- This is the end' >> resources/db/migrations/passwords.sql` to make a change to the migration file.
 
@@ -339,23 +346,33 @@ So `muutto` detected that the migration file is changed it and exited with error
 
 ### Testing
 
-Ad-hoc testing with `muutto psql` are find for simple tests, but for proper testing, you need a test library. The good news is that there is a good library available, and `muutto` comes with it bundled in.
-
-The excellent database unit testing library is [PGunit](https://github.com/adrianandrei-ca/pgunit). You should definitely give a quick read on PGunit documentation.
-
-Let's add a test migration to set up the test database:
+Ad-hoc testing with `muutto psql` are fine for simple tests, but for proper testing, you need a test library. Let's use excellent database unit testing library [PGunit](https://github.com/adrianandrei-ca/pgunit). Download the `https://github.com/adrianandrei-ca/pgunit/blob/master/PGUnit.sql` file and save it to `resources/db/test/migrations/pgunit.sql`. The PGunit requires a `dblink` extension and it's a good idea to install both the extension and the PGunit to it's own schema. So let's create a small migration SQL to do that:
 
 `resources/db/test/migrations/init-tests.sql`:
 
 ```sql
---
--- To make testting easier, allow example app and user to use pgunit:
---
-
+create schema if not exists pgunit;
+create extension if not exists dblink schema pgunit;
 grant usage on schema pgunit to example_app, example_user;
+alter default privileges in schema pgunit grant execute on functions to example_app, example_user;
+
+create schema if not exists test;
 ```
 
-This migration is in `resources/db/test/migrations` directory that is configured in `test` database environment. It will not be migrated to other databases.
+We need to make sure that the `init-tests.sql` is run before the `pgunit.sql`. We could edit the `pgunit.sql` and add `-- muutto:requires: init-tests.sql`, but I don't like to edit files that are part of vendor package. Fortunately, there is another way to add metadata to migration files.
+
+Create a metadata file for `pgunit.sql`:
+
+`resources/db/test/migrations/pgunit.edn`:
+
+```clojure
+{:requires    ["init-tests.sql"]
+ :search-path ["pgunit" "public"]}
+```
+
+When `muutto` finds a `.edn` file that has same name as the SQL file, it uses that as metadata.
+
+_Note:_ The metadata EDN file is considered to a part of the migration, so it is also checked against changes.
 
 Next add some simple tests for `accounts` table:
 
@@ -365,6 +382,8 @@ Next add some simple tests for `accounts` table:
 --
 -- Test suite setup and teardown:
 --
+
+-- muutto:search-path: example test pgunit public
 
 
 create or replace function test.test_setup_accounts()
@@ -415,37 +434,38 @@ begin
   perform pgunit.test_assertTrue('account found', found_username = 'tiger');
 end;
 $$;
+
 ```
 
 Lets try the `test` command:
 
 ```bash
 $ muutto test
-uutto: run db tests on database hello_test
-creating database                                         ok (0.297 sec)
-installing PGUnit                                         ok (0.176 sec)
+muutto: run db tests on database hello_test
+creating database                                         ok (0.304 sec)
 migrating database
 muutto: migrating database hello_test
-   test-resources/db/migrations/init.sql       migrated (0.092 sec)
-   test-resources/db/migrations/accounts.sql   migrated (0.082 sec)
-   test-resources/db/migrations/passwords.sql  migrated (0.092 sec)
-migrated 3 files in 0.267 sec
-   test-resources/db/test/migrations/init-tests.sql  migrated (0.081 sec)
-migrated 1 files in 0.081 sec
+   test-resources/db/migrations/accounts.sql   migrated (0.095 sec)
+   test-resources/db/migrations/init.sql       migrated (0.094 sec)
+   test-resources/db/migrations/passwords.sql  migrated (0.088 sec)
+migrated 3 files in 0.278 sec
+   test-resources/db/test/migrations/init-tests.sql  migrated (0.099 sec)
+   test-resources/db/test/migrations/pgunit.sql      migrated (0.096 sec)
+migrated 2 files in 0.196 sec
 installing tests
-  test-resources/db/test/tests/test-accounts.sql          ok (0.102 sec)
-installed 1 tests in 0.190 sec
+  test-resources/db/test/tests/test-accounts.sql          ok (0.087 sec)
+installed 1 tests in 0.175 sec
 running tests
 test_case_accounts_app_role                               ok (00.002 sec)
-test_case_accounts_user_role                              ok (00.002 sec)
-tests run in 0.108 sec
-total time: 1.390 sec
+test_case_accounts_user_role                              ok (00.001 sec)
+tests run in 0.109 sec
+total time: 1.338 sec
 ```
 
-Notice the important things:
+Notice that:
 
 - The `test` command used database `hello_test`
-- Note that using different databases for development and testing is not required, but it is very handy to do so
+- Using different databases for development and testing is not required, but it is very handy to do so
 - The `hello_test` database did not exists, so it was created automatically and the migrations were applied
 - Finally the tests we're added to the database and ran
 
@@ -458,6 +478,7 @@ Let's add another test for passwords table to make sure that the `example_user` 
 -- Test suite setup and teardown:
 --
 
+-- muutto:search-path: example test pgunit public
 
 create or replace function test.test_setup_password()
   returns void
@@ -467,7 +488,7 @@ begin
   insert into accounts (username, email) values ('tiger', 'tiger@example.com');
   insert into passwords (account_id, password) values 
     (
-      (select id from accounts where email = 'tiger@example.com'),
+      (select account_id from accounts where email = 'tiger@example.com'),
       'hunter2'
     );
 end;
@@ -498,7 +519,7 @@ begin
   from
     passwords
   join 
-    accounts on accounts.id = passwords.account_id
+    accounts on accounts.account_id = passwords.account_id
   where
     email = 'tiger@example.com';
   perform pgunit.test_assertTrue('got password', found_password = 'hunter2');
@@ -519,7 +540,7 @@ begin
   from
     passwords
   join 
-    accounts on accounts.id = passwords.account_id
+    accounts on accounts.account_id = passwords.account_id
   where
     email = 'tiger@example.com';
   
@@ -533,37 +554,38 @@ end;
 $$;
 ```
 
-Run the tests:
+Run the tests again:
 
 ```bash
-$ muutto test
 muutto: run db tests on database hello_test
-creating database                                         skip (0.099 sec)
-installing PGUnit                                         skip (0.085 sec)
+creating database                                         skip (0.105 sec)
 migrating database
 muutto: migrating database hello_test
-   test-resources/db/migrations/init.sql       skipped  (0.000 sec)
    test-resources/db/migrations/accounts.sql   skipped  (0.000 sec)
+   test-resources/db/migrations/init.sql       skipped  (0.000 sec)
    test-resources/db/migrations/passwords.sql  skipped  (0.000 sec)
 migrated 3 files in 0.000 sec
    test-resources/db/test/migrations/init-tests.sql  skipped  (0.000 sec)
-migrated 1 files in 0.000 sec
+   test-resources/db/test/migrations/pgunit.sql      skipped  (0.000 sec)
+migrated 2 files in 0.000 sec
 installing tests
-  test-resources/db/test/tests/test-password.sql          ok (0.087 sec)
-  test-resources/db/test/tests/test-accounts.sql          ok (0.095 sec)
-installed 2 tests in 0.280 sec
+  test-resources/db/test/tests/test-password.sql          ok (0.089 sec)
+  test-resources/db/test/tests/test-accounts.sql          ok (0.090 sec)
+installed 2 tests in 0.271 sec
 running tests
 test_case_accounts_app_role                               ok (00.002 sec)
 test_case_accounts_user_role                              ok (00.001 sec)
-test_case_password_app_role                               ok (00.001 sec)
+test_case_password_app_role                               ok (00.002 sec)
 test_case_password_user_role                              ok (00.001 sec)
-tests run in 0.120 sec
-total time: 0.857 sec
+tests run in 0.115 sec
+total time: 0.783 sec
 ```
 
 Everything works as expected.
 
-### Manually creating databases
+### Create and initialize databases
+
+You can create and initialize database manually.
 
 ```bash
 $ muutto create dev
@@ -572,7 +594,9 @@ $ muutto init dev
 muutto: initializing database hello_dev
 ```
 
-### Droppimng databases
+### Drop databases
+
+You can drop databases, as long as they are not marked as locked.
 
 ```bash
 $ muutto drop dev
@@ -585,10 +609,10 @@ $
 
 ### psql
 
-You can run ad-hoc queries with the `psql` command:
+You can run ad-hoc queries as arguments with the `psql` command:
 
 ```bash
-$ muutto psql dev 'select now()'
+$ muutto psql dev "select now()"
               now
 -------------------------------
  2026-05-19 07:02:58.116711+00

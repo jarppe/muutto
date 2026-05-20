@@ -2,6 +2,7 @@
 -- Test suite setup and teardown:
 --
 
+-- muutto:search-path: example test pgunit public
 
 create or replace function test.test_setup_password()
   returns void

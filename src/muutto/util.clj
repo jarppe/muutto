@@ -1,15 +1,11 @@
 (ns muutto.util
   (:require [clojure.string :as str]
-            [clojure.java.io :as io]
-            [muutto.log :as log])
+            [clojure.java.io :as io])
   (:import (java.time ZoneId
                       ZonedDateTime)
            (java.time.format DateTimeFormatter) 
            (java.io File)
-           (java.nio.file Path
-                          Files)
-           (java.security MessageDigest)
-           (java.util HexFormat)))
+           (java.nio.file Path)))
 
 
 (def exit-on-error? true)
@@ -49,16 +45,6 @@
                                     (.getName (.getClass file))
                                     "nil"))
                           {}))))
-
-
-(def hex-format (-> (HexFormat/of)
-                    (.withLowerCase)))
-
-
-(defn file-hash [file]
-  (->> (Files/readAllBytes file)
-       (.digest (MessageDigest/getInstance "SHA-256"))
-       (.formatHex hex-format)))
 
 
 (def cwd (to-path "."))

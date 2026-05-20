@@ -1,5 +1,3 @@
--- from: https://github.com/adrianandrei-ca/pgunit/blob/master/PGUnit.sql
-
 create type test_results as (
   test_name varchar, 
   successful boolean, 

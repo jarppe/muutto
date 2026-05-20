@@ -1,0 +1,3 @@
+{:requires    ["init-tests.sql"]
+ :search-path ["pgunit" "public"]
+ :source      "https://github.com/adrianandrei-ca/pgunit/blob/master/PGUnit.sql"}

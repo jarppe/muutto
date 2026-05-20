@@ -22,7 +22,8 @@
   (let [psql    (str/join " " [(config/get config :psql-wrapper)
                                (config/get config :psql-command)])
         tty?    (-> config :tty)
-        stmts   (if (sequential? stmt) stmt [stmt])
+        stmts   (->> (if (sequential? stmt) stmt [stmt])
+                     (filter some?))
         input   (let [inputs (keep to-input stmt)]
                   (when (> (count inputs) 1)
                     (error! "only one sql statement can be an input file"))
